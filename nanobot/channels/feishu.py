@@ -793,17 +793,27 @@ class FeishuChannel(BaseChannel):
             if not content and not media_paths:
                 return
 
+            # Extract thread_id for multi-session support
+            thread_id = message.thread_id if hasattr(message, 'thread_id') else None
+            
+            # Build session key: use thread_id if present, otherwise fall back to chat_id
+            # Format: feishu:thread_<thread_id> or feishu:<chat_id>
+            if thread_id:
+                session_key = f"thread_{thread_id}"
+            else:
+                session_key = chat_id if chat_type == "group" else sender_id
+            
             # Forward to message bus
-            reply_to = chat_id if chat_type == "group" else sender_id
             await self._handle_message(
                 sender_id=sender_id,
-                chat_id=reply_to,
+                chat_id=session_key,
                 content=content,
                 media=media_paths,
                 metadata={
                     "message_id": message_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
+                    "thread_id": thread_id,
                 }
             )
 
