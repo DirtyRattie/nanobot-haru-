@@ -270,6 +270,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._bot_open_id: str = ""  # Bot's own open_id for mention detection
     
     async def start(self) -> None:
         """Start the Feishu bot with WebSocket long connection."""
@@ -290,6 +291,19 @@ class FeishuChannel(BaseChannel):
             .app_secret(self.config.app_secret) \
             .log_level(lark.LogLevel.INFO) \
             .build()
+        
+        # Get bot's own open_id for mention detection
+        try:
+            from lark_oapi.api.bot.v3 import BotInfoRequest
+            request = BotInfoRequest.builder().build()
+            response = self._client.bot.v3.bot_info.get(request)
+            if response.success():
+                self._bot_open_id = response.data.bot.open_id
+                logger.info("Feishu bot open_id: {}", self._bot_open_id)
+            else:
+                logger.warning("Failed to get bot info: {}", response.msg)
+        except Exception as e:
+            logger.warning("Failed to get bot open_id: {}", e)
         
         # Create event handler (only register message receive, ignore other events)
         event_handler = lark.EventDispatcherHandler.builder(
@@ -746,6 +760,26 @@ class FeishuChannel(BaseChannel):
             chat_id = message.chat_id
             chat_type = message.chat_type
             msg_type = message.message_type
+
+            # Group chat permission check
+            if chat_type == "group":
+                policy = self.config.group_policy
+                
+                if policy == "allowlist":
+                    if chat_id not in self.config.group_allow_from:
+                        logger.debug("Group {} not in allowlist, ignoring", chat_id)
+                        return
+                
+                elif policy == "mention":
+                    # Check if bot is mentioned
+                    mentions = getattr(message, 'mentions', None) or []
+                    bot_mentioned = any(
+                        getattr(getattr(m, 'id', None), 'open_id', None) == self._bot_open_id
+                        for m in mentions
+                    ) if self._bot_open_id else True  # If bot_open_id unknown, pass through
+                    if not bot_mentioned:
+                        logger.debug("Bot not mentioned in group {}, ignoring", chat_id)
+                        return
 
             # Add reaction
             await self._add_reaction(message_id, self.config.react_emoji)
