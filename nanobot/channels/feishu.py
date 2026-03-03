@@ -657,7 +657,11 @@ class FeishuChannel(BaseChannel):
             return
 
         try:
-            receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
+            # Use raw_chat_id from metadata if available (msg.chat_id may be a session key like feishu:thread_xxx)
+            meta = msg.metadata or {}
+            raw_chat_id = meta.get("raw_chat_id") or meta.get("raw_sender_id") or msg.chat_id
+            receive_id_type = "chat_id" if raw_chat_id.startswith("oc_") else "open_id"
+            receive_id = raw_chat_id
             loop = asyncio.get_running_loop()
 
             # Check if we should update an existing message
@@ -673,7 +677,7 @@ class FeishuChannel(BaseChannel):
                     if key:
                         await loop.run_in_executor(
                             None, self._send_message_sync,
-                            receive_id_type, msg.chat_id, "image", json.dumps({"image_key": key}, ensure_ascii=False),
+                            receive_id_type, receive_id, "image", json.dumps({"image_key": key}, ensure_ascii=False),
                         )
                 else:
                     key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
@@ -681,7 +685,7 @@ class FeishuChannel(BaseChannel):
                         media_type = "audio" if ext in self._AUDIO_EXTS else "file"
                         await loop.run_in_executor(
                             None, self._send_message_sync,
-                            receive_id_type, msg.chat_id, media_type, json.dumps({"file_key": key}, ensure_ascii=False),
+                            receive_id_type, receive_id, media_type, json.dumps({"file_key": key}, ensure_ascii=False),
                         )
 
             if msg.content and msg.content.strip():
@@ -698,12 +702,12 @@ class FeishuChannel(BaseChannel):
                         # Fallback: original message is not a card, send as new message
                         await loop.run_in_executor(
                             None, self._send_message_sync,
-                            receive_id_type, msg.chat_id, "interactive", card_content,
+                            receive_id_type, receive_id, "interactive", card_content,
                         )
                 else:
                     await loop.run_in_executor(
                         None, self._send_message_sync,
-                        receive_id_type, msg.chat_id, "interactive", card_content,
+                        receive_id_type, receive_id, "interactive", card_content,
                     )
 
         except Exception as e:
@@ -795,15 +799,17 @@ class FeishuChannel(BaseChannel):
 
             # Extract thread_id for multi-session support
             thread_id = message.thread_id if hasattr(message, 'thread_id') else None
-            
-            # Build session key: use thread_id if present, otherwise fall back to chat_id
-            # Format: feishu:thread_<thread_id> or feishu:<chat_id>
+
+            # Build session key: use thread_id if present, otherwise fall back to chat_id/sender_id
+            # Format: feishu:thread_<thread_id> (thread) or feishu:<chat_id>/<sender_id> (no thread)
             if thread_id:
-                session_key = f"thread_{thread_id}"
+                session_key = f"feishu:thread_{thread_id}"
             else:
-                session_key = chat_id if chat_type == "group" else sender_id
-            
+                raw_id = chat_id if chat_type == "group" else sender_id
+                session_key = f"feishu:{raw_id}"
+
             # Forward to message bus
+            # Pass raw chat_id in metadata so send() can construct the correct receive_id
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=session_key,
@@ -814,6 +820,8 @@ class FeishuChannel(BaseChannel):
                     "chat_type": chat_type,
                     "msg_type": msg_type,
                     "thread_id": thread_id,
+                    "raw_chat_id": chat_id,
+                    "raw_sender_id": sender_id,
                 }
             )
 
