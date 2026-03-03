@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-import httpx
 from loguru import logger
+import httpx
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -19,11 +19,11 @@ from nanobot.config.schema import DingTalkConfig
 
 try:
     from dingtalk_stream import (
-        AckMessage,
+        DingTalkStreamClient,
+        Credential,
         CallbackHandler,
         CallbackMessage,
-        Credential,
-        DingTalkStreamClient,
+        AckMessage,
     )
     from dingtalk_stream.chatbot import ChatbotMessage
 

@@ -1,8 +1,8 @@
 """Utility functions for nanobot."""
 
 import re
-from datetime import datetime
 from pathlib import Path
+from datetime import datetime
 
 
 def ensure_dir(path: Path) -> Path:

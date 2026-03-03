@@ -31,8 +31,6 @@ try:
         GetFileRequest,
         GetMessageResourceRequest,
         P2ImMessageReceiveV1,
-        PatchMessageRequest,
-        PatchMessageRequestBody,
     )
     FEISHU_AVAILABLE = True
 except ImportError:
@@ -620,38 +618,8 @@ class FeishuChannel(BaseChannel):
             logger.error("Error sending Feishu {} message: {}", msg_type, e)
             return False
 
-    def _patch_message_sync(self, message_id: str, content: str) -> bool:
-        """Patch (update) an existing interactive card message synchronously using PatchMessage API.
-        
-        Note: UpdateMessage (PUT) does not support interactive type — PatchMessage must be used instead.
-        """
-        try:
-            request = PatchMessageRequest.builder() \
-                .message_id(message_id) \
-                .request_body(
-                    PatchMessageRequestBody.builder()
-                    .content(content)
-                    .build()
-                ).build()
-            response = self._client.im.v1.message.patch(request)
-            if not response.success():
-                logger.error(
-                    "Failed to patch Feishu message {}: code={}, msg={}, log_id={}",
-                    message_id, response.code, response.msg, response.get_log_id()
-                )
-                return False
-            logger.debug("Feishu message {} patched successfully", message_id)
-            return True
-        except Exception as e:
-            logger.error("Error patching Feishu message {}: {}", message_id, e)
-            return False
-
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through Feishu, including media (images/files) if present.
-        
-        If msg.metadata contains 'message_id', the existing interactive card message
-        will be updated via PatchMessage instead of creating a new one.
-        """
+        """Send a message through Feishu, including media (images/files) if present."""
         if not self._client:
             logger.warning("Feishu client not initialized")
             return
@@ -659,9 +627,6 @@ class FeishuChannel(BaseChannel):
         try:
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
             loop = asyncio.get_running_loop()
-
-            # Check if we should update an existing message
-            update_message_id = msg.metadata.get("message_id") if msg.metadata else None
 
             for file_path in msg.media:
                 if not os.path.isfile(file_path):
@@ -686,19 +651,10 @@ class FeishuChannel(BaseChannel):
 
             if msg.content and msg.content.strip():
                 card = {"config": {"wide_screen_mode": True}, "elements": self._build_card_elements(msg.content)}
-                card_content = json.dumps(card, ensure_ascii=False)
-
-                if update_message_id:
-                    # Update existing card via PatchMessage (UpdateMessage doesn't support interactive type)
-                    await loop.run_in_executor(
-                        None, self._patch_message_sync,
-                        update_message_id, card_content,
-                    )
-                else:
-                    await loop.run_in_executor(
-                        None, self._send_message_sync,
-                        receive_id_type, msg.chat_id, "interactive", card_content,
-                    )
+                await loop.run_in_executor(
+                    None, self._send_message_sync,
+                    receive_id_type, msg.chat_id, "interactive", json.dumps(card, ensure_ascii=False),
+                )
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
