@@ -690,10 +690,16 @@ class FeishuChannel(BaseChannel):
 
                 if update_message_id:
                     # Update existing card via PatchMessage (UpdateMessage doesn't support interactive type)
-                    await loop.run_in_executor(
+                    patched = await loop.run_in_executor(
                         None, self._patch_message_sync,
                         update_message_id, card_content,
                     )
+                    if not patched:
+                        # Fallback: original message is not a card, send as new message
+                        await loop.run_in_executor(
+                            None, self._send_message_sync,
+                            receive_id_type, msg.chat_id, "interactive", card_content,
+                        )
                 else:
                     await loop.run_in_executor(
                         None, self._send_message_sync,
